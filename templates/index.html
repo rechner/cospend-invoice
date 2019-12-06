@@ -1,0 +1,7 @@
+<ul>
+{% for idx, member in members.items() %}
+  {% if member.activated %}
+    <li><a href="{{ url_for('invoice') }}/{{ idx }}">{{ member.name }}</a></li>
+  {% endif %}
+{% endfor %}
+</ul>
