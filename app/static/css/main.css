@@ -1,0 +1,11 @@
+td.amount {
+    text-align: right;
+}
+
+span.balance-negative {
+    color: red;
+}
+
+.balance {
+    color: green;
+}
