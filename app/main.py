@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import csv
-from io import StringIO
+from io import StringIO, BytesIO
 from datetime import datetime
 from decimal import Decimal
 from flask import Flask, request, render_template, url_for, Response, send_file
@@ -66,12 +66,15 @@ def download_csv(idx):
                 writer.writerow(row)
 
         csv_buffer.seek(0)
+        mem = BytesIO()
+        mem.write(csv_buffer.getvalue().encode('utf-8'))
+        mem.seek(0)
         csv_buffer.close()
 
         date_string = datetime.today().isoformat()[:10]
         filename = "cospend_invoice-{0}.csv".format(date_string)
     return send_file(
-        csv_buffer,
+        mem,
         as_attachment=True,
         attachment_filename=filename,
         mimetype="text/csv",
