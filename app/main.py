@@ -66,10 +66,16 @@ def download_csv(idx):
                 writer.writerow(row)
 
         csv_buffer.seek(0)
+        csv_buffer.close()
 
         date_string = datetime.today().isoformat()[:10]
-        filename = "invoice-{0}.csv".format(date_string)
-        return send_file(csv_buffer, as_attachment=True, attachment_filename=filename)
+        filename = "cospend_invoice-{0}.csv".format(date_string)
+    return send_file(
+        csv_buffer,
+        as_attachment=True,
+        attachment_filename=filename,
+        mimetype="text/csv",
+    )
 
 
 @app.route("/test")
