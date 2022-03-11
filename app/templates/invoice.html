@@ -46,7 +46,7 @@
       {% for row in table %}
       <tr>
         <td>{{ row.date }}</td>
-        <td><span class="">{{ row.category }}</span></td>
+        <td><span class="">{{ row.category.name }}</span></td>
         <td>{{ row.what|safe }}</td>
         <td>{{ row.who}}</td>
         {% if row.amount < 0 %}

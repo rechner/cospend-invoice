@@ -3,22 +3,10 @@ from decimal import Decimal
 from typing import Any, List, Dict
 import datetime
 import requests
-from jinja2 import Markup
 
 from app.config import *
 
 TWOPLACES = Decimal(10) ** -2
-CATEGORIES = {
-    -1: "Groceries",
-    -2: "Leisure",
-    -3: "Rent",
-    -4: "Bills",
-    -5: "Culture",
-    -6: "Health",
-    -7: "Tools",
-    -8: "Multimedia",
-    -9: "Clothes",
-}
 
 PAYMENT_MODES = {
     "c": "Credit Card",
@@ -26,114 +14,131 @@ PAYMENT_MODES = {
     "f": "Check",
 }
 
+CATEGORIES = {
+    -1: {"name": "Groceries"},
+    -2: {"name": "Leisure"},
+    -3: {"name": "Rent"},
+    -4: {"name": "Bills"},
+    -5: {"name": "Culture"},
+    -6: {"name": "Health"},
+    -7: {"name": "Tools"},
+    -8: {"name": "Multimedia"},
+    -9: {"name": "Clothes"},
+    -11: {"name": "Reimbursement"},
+}
+
 URL_REGEX = re.compile(r"(https?://[^ ]+)")
 
 
-def get_members(api_url=API_URL):
-    api_response = requests.get(api_url).json()
-    parsed_members = {}
-    for member in api_response["members"]:
-        parsed_members[member["id"]] = member
+class CospendAPI(object):
+    def __init__(self, api_url=API_URL):
+        self.api_url = api_url
+        self.members = None
+        self.categories = CATEGORIES
+        self.get_members()
 
-    return parsed_members, api_response
+    def get_members(self):
+        api_response = requests.get(self.api_url).json()
+        parsed_members = {}
+        for member in api_response["members"]:
+            parsed_members[member["id"]] = member
 
+        self.members = parsed_members
+        self.categories.update(api_response.get("categories"))
 
-def get_active_members(members):
-    return [members[idx] for idx in members if members[idx]["activated"]]
+        return self.members, api_response
 
+    def get_active_members(self):
+        return [self.members[idx] for idx in self.members if self.members[idx]["activated"]]
 
-# if len(sys.argv) != 2:
-#    print("Usage: {0} file.csv".format(sys.argv[0]))
-#    exit(1)
+    def parse_invoice_data(
+        self,
+        start_date: datetime.datetime = None,
+        end_date: datetime.datetime = None,
+        html: bool = False,
+    ) -> Dict[str, Any]:
+        all_owers = set()
 
+        _, project = self.get_members()
 
-def parse_invoice_data(
-    start_date: datetime.datetime = None,
-    end_date: datetime.datetime = None,
-    html: bool = False,
-) -> List[Dict[str, Any]]:
-    all_owers = set()
+        debts = {}
+        credits = {}
 
-    members, project = get_members(API_URL)
+        api_response = requests.get("{}/bills".format(self.api_url)).json()
 
-    debts = {}
-    credits = {}
+        for row in api_response:
+            owers = row["owers"]
+            amount_each = Decimal(row["amount"]).quantize(TWOPLACES)
+            amount_each /= len(owers)
 
-    api_response = requests.get("{}/bills".format(API_URL)).json()
+            row["payer"] = self.members[row["payer_id"]]
+            row["payer_name"] = row["payer"]["name"]
 
-    for row in api_response:
-        owers = row["owers"]
-        amount_each = Decimal(row["amount"]).quantize(TWOPLACES)
-        amount_each /= len(owers)
+            if row["what"] == "deleteMeIfYouWant":
+                continue
 
-        row["payer"] = members[row["payer_id"]]
-        row["payer_name"] = row["payer"]["name"]
+            if len(owers) > 1:
+                what = "1/{0} {1}".format(len(owers), row["what"])
+            else:
+                what = row["what"]
 
-        if row["what"] == "deleteMeIfYouWant":
-            continue
+            if html:
+                what = format_urls(what)
 
-        if len(owers) > 1:
-            what = "1/{0} {1}".format(len(owers), row["what"])
-        else:
-            what = row["what"]
+            print(what, row["categoryid"])
+            category = self.categories.get(row.get("categoryid"))
+            #if category["name"] == "" and "rent" in what.lower():
+            #    category = "Rent"
 
-        if html:
-            what = format_urls(what)
+            doc = {
+                "date": row["date"],
+                "who": row["payer_name"],
+                "amount": amount_each.quantize(TWOPLACES),
+                "what": what,
+                "category": category,
+            }
 
-        category = CATEGORIES.get(row.get("category_id"), "")
-        if category == "" and "rent" in what.lower():
-            category = "Rent"
+            date = datetime.datetime.fromisoformat(row["date"])
+            if start_date is not None and date < start_date:
+                continue
 
-        doc = {
-            "date": row["date"],
-            "who": row["payer_name"],
-            "amount": amount_each.quantize(TWOPLACES),
-            "what": what,
-            "category": category,
-        }
+            if end_date is not None and date > end_date:
+                continue
 
-        date = datetime.datetime.fromisoformat(row["date"])
-        if start_date is not None and date < start_date:
-            continue
+            for ower in owers:
+                all_owers.add(ower["name"])
+                if ower["id"] not in debts:
+                    debts[ower["id"]] = [
+                        doc,
+                    ]
+                else:
+                    debts[ower["id"]].append(doc)
 
-        if end_date is not None and date > end_date:
-            continue
+            doc = {
+                "date": row["date"],
+                "who": row["payer_name"],
+                "amount": -amount_each.quantize(TWOPLACES),
+                "what": what,
+                "category": category,
+            }
 
-        for ower in owers:
-            all_owers.add(ower["name"])
-            if ower["id"] not in debts:
-                debts[ower["id"]] = [
+            if row["payer_id"] not in credits:
+                credits[row["payer_id"]] = [
                     doc,
                 ]
             else:
-                debts[ower["id"]].append(doc)
+                credits[row["payer_id"]].append(doc)
 
-        doc = {
-            "date": row["date"],
-            "who": row["payer_name"],
-            "amount": -amount_each.quantize(TWOPLACES),
-            "what": what,
-            "category": category,
+        return {
+            "debts": debts,
+            "credits": credits,
+            "members": self.members,
+            "project": project,
         }
-
-        if row["payer_id"] not in credits:
-            credits[row["payer_id"]] = [
-                doc,
-            ]
-        else:
-            credits[row["payer_id"]].append(doc)
-
-    return {
-        "debts": debts,
-        "credits": credits,
-        "members": members,
-        "project": project,
-    }
 
 
 def format_urls(inp: str) -> str:
     def sub_url(match: re.Match) -> str:
-        url = match.group(1)
         return '<a href="{0}">{0}</a>'.format(match.group(1))
 
     return URL_REGEX.sub(sub_url, inp)

@@ -5,13 +5,15 @@ from datetime import datetime
 from decimal import Decimal
 from flask import Flask, request, render_template, url_for, Response, send_file
 from app import util
+from app.util import CospendAPI
 
 app = Flask(__name__)
 
 
 @app.route("/")
 def index():
-    members, project = util.get_members()
+    api = CospendAPI()
+    members, project = api.get_members()
     return render_template("index.html", members=members)
 
 
@@ -25,7 +27,8 @@ def invoice(idx):
     if end_date is not None:
         end_date = datetime.fromisoformat(end_date)
 
-    ctx = util.parse_invoice_data(start_date=start_date, end_date=end_date, html=True,)
+    api = CospendAPI()
+    ctx = api.parse_invoice_data(start_date=start_date, end_date=end_date, html=True)
 
     balance = Decimal(ctx["project"]["balance"][str(idx)]).quantize(util.TWOPLACES)
 
@@ -59,10 +62,12 @@ def download_csv(idx):
 
         if idx in ctx["debts"]:
             for row in ctx["debts"][idx]:
+                row["category"] = row["category"]["name"]
                 writer.writerow(row)
 
         if idx in ctx["credits"]:
             for row in ctx["credits"][idx]:
+                row["category"] = row["category"]["name"]
                 writer.writerow(row)
 
         csv_buffer.seek(0)
